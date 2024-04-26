@@ -66,6 +66,8 @@ INSTALLED_APPS = (
     "reversion",
     "ckeditor",
     "ckeditor_uploader",
+    "oauth2_provider",
+    "corsheaders",
     "rest_framework",
     "rest_framework.authtoken",
     "drf_spectacular",
@@ -95,6 +97,7 @@ MODOBOA_APPS = (
     "modoboa.dmarc",
     "modoboa.imap_migration",
     "modoboa.postfix_autoreply",
+    "modoboa.sievefilters",
     # Modoboa extensions here.
 )
 
@@ -113,6 +116,7 @@ MIDDLEWARE = (
     "django.contrib.sessions.middleware.SessionMiddleware",
     "django.middleware.locale.LocaleMiddleware",
     "x_forwarded_for.middleware.XForwardedForMiddleware",
+    "corsheaders.middleware.CorsMiddleware",
     "django.middleware.common.CommonMiddleware",
     "django.middleware.csrf.CsrfViewMiddleware",
     "django.contrib.auth.middleware.AuthenticationMiddleware",
@@ -166,6 +170,8 @@ ROOT_URLCONF = "test_project.urls"
 
 WSGI_APPLICATION = "test_project.wsgi.application"
 
+CORS_ORIGIN_ALLOW_ALL = True
+
 # Internationalization
 # https://docs.djangoproject.com/en/2.2/topics/i18n/
 
@@ -189,6 +195,22 @@ STATICFILES_DIRS = (os.path.join(BASE_DIR, "..", "modoboa", "bower_components"),
 MEDIA_URL = "/media/"
 MEDIA_ROOT = os.path.join(BASE_DIR, "media")
 
+# oAuth2 settings
+
+OAUTH2_PROVIDER = {
+    "OIDC_ENABLED": True,
+    "OIDC_RP_INITIATED_LOGOUT_ENABLED": True,
+    "OIDC_RP_INITIATED_LOGOUT_ALWAYS_PROMPT": True,
+    "OIDC_RSA_PRIVATE_KEY": os.environ.get("OIDC_RSA_PRIVATE_KEY"),
+    "SCOPES": {
+        "openid": "OpenID Connect scope",
+        "read": "Read scope",
+        "write": "Write scope",
+        "introspection": "Introspect token scope",
+    },
+    "DEFAULT_SCOPES": ["openid", "read", "write"],
+}
+
 # Rest framework settings
 
 REST_FRAMEWORK = {
@@ -202,7 +224,7 @@ REST_FRAMEWORK = {
         "password_recovery_apply": "25/hour",
     },
     "DEFAULT_AUTHENTICATION_CLASSES": (
-        "modoboa.core.drf_authentication.JWTAuthenticationWith2FA",
+        "oauth2_provider.contrib.rest_framework.OAuth2Authentication",
         "rest_framework.authentication.TokenAuthentication",
         "rest_framework.authentication.SessionAuthentication",
     ),

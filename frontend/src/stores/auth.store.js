@@ -3,15 +3,31 @@ import Cookies from 'js-cookie'
 import { defineStore } from 'pinia'
 import { computed, ref } from 'vue'
 import gettext from '@/plugins/gettext'
+import router from '@/router/index.js'
+import { UserManager } from 'oidc-client-ts'
 
 import repository from '@/api/repository'
 import accountApi from '@/api/account'
 import accountsApi from '@/api/accounts'
-import authApi from '@/api/auth'
+
+import { useGlobalConfig } from '@/main'
 
 export const useAuthStore = defineStore('auth', () => {
-  const authUser = ref({})
+  const config = useGlobalConfig()
+  const authUser = ref(null)
   const isAuthenticated = ref(false)
+  const manager = new UserManager({
+    authority: config.OAUTH_AUTHORITY_URL,
+    client_id: config.OAUTH_CLIENT_ID,
+    redirect_uri: config.OAUTH_REDIRECT_URI,
+    response_type: 'code',
+    scope: 'openid read write',
+    automaticSilentRenew: true,
+    accessTokenExpiringNotificationTime: 60,
+    monitorSession: true,
+    filterProtocolClaims: true,
+    loadUserInfo: true,
+  })
 
   const userHasMailbox = computed(() => {
     return authUser.value.mailbox !== null
@@ -25,34 +41,69 @@ export const useAuthStore = defineStore('auth', () => {
     })
   }
 
+  function getAccessToken() {
+    return manager.getUser().then((user) => {
+      if (!user) {
+        return null
+      }
+      return user.access_token
+    })
+  }
+
   async function initialize() {
-    const token = Cookies.get('token')
-    if (!token) {
-      return
+    if (isAuthenticated.value) {
+      return null
     }
-    repository.defaults.headers.common.Authorization = `Bearer ${token}`
-    repository.defaults.headers.post['Content-Type'] = 'application/json'
+    const user = await manager.getUser()
+    if (!user) {
+      return null
+    }
     return fetchUser()
   }
 
-  async function login(payload) {
-    const resp = await authApi.requestToken(payload)
-    const cookiesAttributes = { sameSite: 'strict' }
-    if (payload.rememberMe) {
-      cookiesAttributes.expires = 90
+  async function validateAccess() {
+    const user = await manager.getUser()
+    if (!user || user.expired) {
+      manager.signinRedirect()
+      return
     }
-
-    const cookie = Cookies.withAttributes(cookiesAttributes)
-    cookie.set('token', resp.data.access)
-    cookie.set('refreshToken', resp.data.refresh)
-    return initialize()
+    repository.defaults.headers.common.Authorization = `Bearer ${user.access_token}`
+    repository.defaults.headers.post['Content-Type'] = 'application/json'
   }
+
+  async function login() {
+    try {
+      await manager.signinRedirect()
+    } catch (error) {
+      console.error('Error logging in:', error)
+    }
+  }
+
+  async function completeLogin() {
+    try {
+      const user = await manager.signinRedirectCallback()
+      isAuthenticated.value = true
+      const previousPage = sessionStorage.getItem('previousPage')
+      // Redirect the user to the previous page if available
+      if (previousPage) {
+        window.location.href = previousPage
+      } else {
+        // Redirect to a default page if the previous page is not available
+        router.push({ name: 'Dashboard' })
+      }
+      return user
+    } catch (error) {
+      console.error('Error completing login:', error)
+      return null
+    }
+  }
+
   async function $reset() {
     delete repository.defaults.headers.common.Authorization
-    Cookies.remove('token')
-    Cookies.remove('refreshToken')
     authUser.value = {}
     isAuthenticated.value = false
+    //TODO: Call the logout callback of OIDC and log out from the IdP
+    manager.signoutRedirect()
   }
 
   async function updateAccount(data) {
@@ -84,13 +135,16 @@ export const useAuthStore = defineStore('auth', () => {
 
   return {
     authUser,
+    completeLogin,
     isAuthenticated,
+    userHasMailbox,
+    validateAccess,
     fetchUser,
+    getAccessToken,
     initialize,
     login,
     $reset,
     updateAccount,
     finalizeTFASetup,
-    userHasMailbox,
   }
 })
